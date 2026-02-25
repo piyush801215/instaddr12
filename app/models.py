@@ -47,3 +47,11 @@ class LoginAttempt(db.Model):
     ip_address = db.Column(db.String(50))
     attempts = db.Column(db.Integer, default=0)
     last_attempt = db.Column(db.DateTime, default=datetime.utcnow)
+class EmailAccount(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    imap_host = db.Column(db.String(120), nullable=False)
+    port = db.Column(db.Integer, default=993)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
