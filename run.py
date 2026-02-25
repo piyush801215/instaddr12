@@ -1,5 +1,7 @@
 from app import create_app, db
 from app.models import User
+from app import create_app, db
+from app.models import User
 from app.telegram_bot import start_telegram_bot
 import os
 
@@ -20,14 +22,15 @@ with app.app_context():
     db.create_all()
     setup_initial_admin()
 
-# ✅ START TELEGRAM BOT HERE
-print("Starting Telegram Bot...")
-start_telegram_bot()
+# 🚀 FIX HERE (IMPORTANT)
+def start_bot():
+    with app.app_context():
+        print("Starting Telegram Bot...")
+        start_telegram_bot()
+
+# Start bot
+start_bot()
 
 @app.route("/")
 def home():
     return "Server is working 🚀"
-# IMPORTANT FOR RENDER
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
