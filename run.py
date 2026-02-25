@@ -15,15 +15,18 @@ def setup_initial_admin():
             db.session.commit()
             print("Super Admin Created.")
 
-# Create DB + Admin on startup
+# Create DB + Admin
 with app.app_context():
     db.create_all()
     setup_initial_admin()
 
+# ✅ START TELEGRAM BOT HERE
+print("Starting Telegram Bot...")
+start_telegram_bot()
+
 @app.route("/")
 def home():
     return "Server is working 🚀"
-
 # IMPORTANT FOR RENDER
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
