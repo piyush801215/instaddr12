@@ -1,42 +1,114 @@
-import telebot, threading, time
-from app.models import User, AssignedEmail
-from app import db
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+from flask import current_app
+from app.models import EmailAccount, db
 
-def start_telegram_bot(app):
-    token, admin = app.config.get('BOT_TOKEN'), app.config.get('ADMIN_ID')
-    if not token or not admin: return
-    try: admin_id = int(admin)
-    except: return
-    
-    bot = telebot.TeleBot(token)
-    
-    def is_admin(m): return m.from_user.id == admin_id
+# ---------------- ADMIN CHECK ----------------
+def is_admin(user_id):
+    return str(user_id) == current_app.config['ADMIN_ID']
 
-    @bot.message_handler(commands=['start'])
-    def welcome(m):
-        if is_admin(m): bot.reply_to(m, "Admin Bot Online.\n/users, /emails [user], /add [user] [email], /del [user] [email]")
 
-    @bot.message_handler(commands=['users'])
-    def users(m):
-        if not is_admin(m): return
-        with app.app_context():
-            bot.reply_to(m, "\n".join([f"{u.username} ({len(u.assigned_emails)})" for u in User.query.all()]))
+# ---------------- START ----------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot is working 🚀")
 
-    @bot.message_handler(commands=['add'])
-    def add(m):
-        if not is_admin(m): return
-        try: u_name, email = m.text.split()[1], m.text.split()[2].lower()
-        except: return
-        with app.app_context():
-            u = User.query.filter_by(username=u_name).first()
-            if u:
-                db.session.add(AssignedEmail(user_id=u.id, email_address=email))
-                db.session.commit()
-                bot.reply_to(m, "Added.")
 
-    def poll():
-        while True:
-            try: bot.polling(non_stop=True)
-            except: time.sleep(5)
-    
-    threading.Thread(target=poll, daemon=True).start()
+# ---------------- ADD ACCOUNT ----------------
+async def add_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user_id = update.effective_user.id
+
+        if not is_admin(user_id):
+            await update.message.reply_text("❌ Not allowed")
+            return
+
+        args = context.args
+
+        if len(args) != 4:
+            await update.message.reply_text(
+                "Usage:\n/add email password imap_host port\n\nExample:\n/add test@kuku.lu pass123 imap.kuku.lu 993"
+            )
+            return
+
+        email = args[0]
+        password = args[1]
+        imap_host = args[2]
+        port = int(args[3])
+
+        acc = EmailAccount(
+            email=email,
+            password=password,
+            imap_host=imap_host,
+            port=port
+        )
+
+        db.session.add(acc)
+        db.session.commit()
+
+        await update.message.reply_text(f"✅ Added: {email}")
+
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
+
+
+# ---------------- LIST ACCOUNTS ----------------
+async def list_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        accounts = EmailAccount.query.all()
+
+        if not accounts:
+            await update.message.reply_text("No accounts found")
+            return
+
+        text = "📧 Accounts:\n\n"
+        for acc in accounts:
+            text += f"{acc.id} - {acc.email}\n"
+
+        await update.message.reply_text(text)
+
+    except Exception as e:
+        await update.message.reply_text(str(e))
+
+
+# ---------------- REMOVE ACCOUNT ----------------
+async def remove_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user_id = update.effective_user.id
+
+        if not is_admin(user_id):
+            await update.message.reply_text("❌ Not allowed")
+            return
+
+        args = context.args
+
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /remove id")
+            return
+
+        acc = EmailAccount.query.get(int(args[0]))
+
+        if not acc:
+            await update.message.reply_text("Account not found")
+            return
+
+        db.session.delete(acc)
+        db.session.commit()
+
+        await update.message.reply_text("🗑 Deleted")
+
+    except Exception as e:
+        await update.message.reply_text(str(e))
+
+
+# ---------------- MAIN BOT START ----------------
+def start_telegram_bot():
+    app = Application.builder().token(current_app.config['BOT_TOKEN']).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add", add_account))
+    app.add_handler(CommandHandler("list", list_accounts))
+    app.add_handler(CommandHandler("remove", remove_account))
+
+    print("Telegram bot started 🚀")
+
+    app.run_polling()
