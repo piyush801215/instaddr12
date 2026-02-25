@@ -10,10 +10,11 @@ def extract_code(t, d):
     m = re.search(fr'\b(\d{{{d}}})\b', t)
     return m.group(1) if m else None
 
+
 class EmailService:
+
     @staticmethod
     def fetch_netflix_data(target_email, category):
-
         try:
             accounts = EmailAccount.query.all()
 
@@ -22,7 +23,7 @@ class EmailService:
 
             now = datetime.now(pytz.utc)
 
-            # --- TIME LIMITS ---
+            # ⏱ time limits
             deltas = {
                 'Login Code': 15,
                 'Household': 15,
@@ -37,11 +38,13 @@ class EmailService:
 
             for acc in accounts:
                 try:
-                    imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port)
+                    # 🔥 connect with timeout
+                    imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port, timeout=10)
                     imap.login(acc.email, acc.password)
                     imap.select("inbox")
 
                     since_date = time_threshold.strftime("%d-%b-%Y")
+
                     status, msgs = imap.search(None, f'(TO "{target_email}") (SINCE "{since_date}")')
 
                     if status != 'OK':
@@ -51,10 +54,18 @@ class EmailService:
                     found_content = None
                     email_timestamp = None
 
-                    for eid in reversed(msgs[0].split()):
-                        _, data = imap.fetch(eid, "(RFC822)")
-                        msg = email.message_from_bytes(data[0][1])
+                    # ⚡ LIMIT emails (VERY IMPORTANT)
+                    email_ids = msgs[0].split()
+                    email_ids = email_ids[-20:]  # only last 20 emails
 
+                    for eid in reversed(email_ids):
+                        try:
+                            _, data = imap.fetch(eid, "(RFC822)")
+                            msg = email.message_from_bytes(data[0][1])
+                        except:
+                            continue
+
+                        # check date
                         date_str = msg.get("Date")
                         if not date_str:
                             continue
@@ -71,7 +82,9 @@ class EmailService:
                         except:
                             continue
 
+                        # extract body
                         body = ""
+
                         if msg.is_multipart():
                             for part in msg.walk():
                                 if part.get_content_type() == "text/plain":
@@ -86,6 +99,7 @@ class EmailService:
                             except:
                                 continue
 
+                        # 🔍 extract data
                         extracted = None
 
                         if category == "Login Code":
@@ -99,10 +113,8 @@ class EmailService:
                             extracted = clean_url(m.group(1)) if m else None
 
                         elif category == "Household":
-                            extracted = [clean_url(u) for u in re.findall(
-                                r'(https://www\.netflix\.com/account/(?:travel|update-primary-location|confirmdevice)[^\s]+)', body)]
-                            if not extracted:
-                                extracted = None
+                            urls = re.findall(r'(https://www\.netflix\.com/account/(?:travel|update-primary-location|confirmdevice)[^\s]+)', body)
+                            extracted = [clean_url(u) for u in urls] if urls else None
 
                         elif category == "Verify Email":
                             m = re.search(r'(https://www\.netflix\.com/verifyemail\?[^\s]+)', body)
@@ -127,7 +139,7 @@ class EmailService:
                         }
 
                 except Exception as e:
-                    print(f"Error with {acc.email}: {e}")
+                    print(f"Account error: {e}")
                     continue
 
             return False, f"No active {category} found", None
