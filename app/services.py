@@ -1,3 +1,5 @@
+from app.models import EmailAccount
+
 import imaplib, email, re, pytz
 from datetime import datetime, timedelta
 from flask import current_app
@@ -8,16 +10,19 @@ def extract_code(t, d): m = re.search(fr'\b(\d{{{d}}})\b', t); return m.group(1)
 class EmailService:
     @staticmethod
     def fetch_netflix_data(target_email, category):
-        user, pwd = current_app.config['EMAIL_USER'], current_app.config['EMAIL_PASS']
-        if not user or not pwd: return False, "Config missing", None
+       
         
+       try:
+    accounts = EmailAccount.query.all()
+
+    if not accounts:
+        return False, "No email accounts added", None
+
+    for acc in accounts:
         try:
-            imap = imaplib.IMAP4_SSL("imap.gmail.com")
-            imap.login(user, pwd)
-            imap.select("inbox")
-            
-            now = datetime.now(pytz.utc)
-            
+            imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port)
+            imap.login(acc.email, acc.password)
+            imap.select("inbox")                   
             # --- NEW TIME LIMITS ---
             deltas = {
                 'Login Code': 15,          # 15 Minutes
@@ -31,6 +36,16 @@ class EmailService:
             # Default to 15 min if unknown
             validity_minutes = deltas.get(category, 15)
             time_threshold = now - timedelta(minutes=validity_minutes)
+imap.logout()
+
+        except Exception as e:
+            print(e)
+            continue
+
+    return False, "No code found", None
+
+except Exception as e:
+    return False, str(e), None
             
             # Search logic
             since_date = time_threshold.strftime("%d-%b-%Y")
