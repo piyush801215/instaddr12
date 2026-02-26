@@ -2,6 +2,7 @@ from app.models import EmailAccount
 import imaplib, email, re, pytz
 from datetime import datetime, timedelta
 from flask import current_app
+from mizu import find_signin_code  # ✅ using your parser
 
 def clean_url(u):
     return re.sub(r'[)\]>"\']+$', '', u)
@@ -38,10 +39,10 @@ class EmailService:
 
             for acc in accounts:
                 try:
-                    # 🔥 connect with timeout
+                    # 🔥 connect
                     imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port, timeout=10)
                     imap.login(acc.email, acc.password)
-                    imap.select("INBOX")  # ✅ FIX: uppercase
+                    imap.select("INBOX")  # ✅ FIX
 
                     since_date = time_threshold.strftime("%d-%b-%Y")
 
@@ -55,20 +56,14 @@ class EmailService:
                     found_content = None
                     email_timestamp = None
 
-                    # ⚡ LIMIT emails
                     email_ids = msgs[0].split()
-                    email_ids = email_ids[-20:]
+                    email_ids = email_ids[-30:]  # slightly increased
 
                     for eid in reversed(email_ids):
                         try:
                             _, data = imap.fetch(eid, "(RFC822)")
                             msg = email.message_from_bytes(data[0][1])
                         except:
-                            continue
-
-                        # ✅ FIX: filter by target_email manually
-                        headers = str(msg)
-                        if target_email.lower() not in headers.lower():
                             continue
 
                         # check date
@@ -93,7 +88,6 @@ class EmailService:
 
                         if msg.is_multipart():
                             for part in msg.walk():
-                                # ✅ FIX: read both plain + html
                                 if part.get_content_type() in ["text/plain", "text/html"]:
                                     try:
                                         body += part.get_payload(decode=True).decode(errors='ignore')
@@ -105,11 +99,15 @@ class EmailService:
                             except:
                                 continue
 
+                        # ✅ FIX: Netflix filter instead of target_email
+                        if "netflix" not in body.lower() and "netflix" not in str(msg).lower():
+                            continue
+
                         # 🔍 extract data
                         extracted = None
 
                         if category == "Login Code":
-                            extracted = extract_code(body, 4)
+                            extracted = find_signin_code(body)  # ✅ using your function
 
                         elif category == "Verification Code":
                             extracted = extract_code(body, 6)
