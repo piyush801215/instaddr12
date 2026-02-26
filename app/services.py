@@ -2,14 +2,33 @@ from app.models import EmailAccount
 import imaplib, email, re, pytz
 from datetime import datetime, timedelta
 from flask import current_app
-from mizu import find_signin_code  # ✅ using your parser
+
 
 def clean_url(u):
     return re.sub(r'[)\]>"\']+$', '', u)
 
+
 def extract_code(t, d):
     m = re.search(fr'\b(\d{{{d}}})\b', t)
     return m.group(1) if m else None
+
+
+# ✅ Netflix code extractor (no mizu import needed)
+def find_signin_code(body):
+    patterns = [
+        r"\n\s*(\d{4})\s*\n",
+        r"^\s*(\d{4})\s*$",
+        r"(?:code|código|codice|code)[^0-9]*(\d{4})",
+        r"\b(\d{4})\b"
+    ]
+
+    for pat in patterns:
+        matches = re.findall(pat, body, flags=re.IGNORECASE)
+        for match in matches:
+            if match.isdigit():
+                return match
+
+    return None
 
 
 class EmailService:
@@ -42,11 +61,11 @@ class EmailService:
                     # 🔥 connect
                     imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port, timeout=10)
                     imap.login(acc.email, acc.password)
-                    imap.select("INBOX")  # ✅ FIX
+                    imap.select("INBOX")  # fixed
 
                     since_date = time_threshold.strftime("%d-%b-%Y")
 
-                    # ✅ FIX: removed TO filter
+                    # ✅ removed TO filter
                     status, msgs = imap.search(None, f'(SINCE "{since_date}")')
 
                     if status != 'OK':
@@ -57,7 +76,7 @@ class EmailService:
                     email_timestamp = None
 
                     email_ids = msgs[0].split()
-                    email_ids = email_ids[-30:]  # slightly increased
+                    email_ids = email_ids[-30:]  # recent emails
 
                     for eid in reversed(email_ids):
                         try:
@@ -99,7 +118,7 @@ class EmailService:
                             except:
                                 continue
 
-                        # ✅ FIX: Netflix filter instead of target_email
+                        # ✅ Netflix filter instead of target_email
                         if "netflix" not in body.lower() and "netflix" not in str(msg).lower():
                             continue
 
@@ -107,7 +126,7 @@ class EmailService:
                         extracted = None
 
                         if category == "Login Code":
-                            extracted = find_signin_code(body)  # ✅ using your function
+                            extracted = find_signin_code(body)
 
                         elif category == "Verification Code":
                             extracted = extract_code(body, 6)
