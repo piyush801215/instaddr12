@@ -20,7 +20,6 @@ def find_signin_code(body):
         for match in matches:
             if match.isdigit():
                 return match
-
     return None
 
 
@@ -42,7 +41,7 @@ class EmailService:
                     imap.login(acc.email, acc.password)
                     imap.select("INBOX")
 
-                    # 🔥 DEBUG: fetch ALL emails
+                    # 🔥 get all emails (for debugging)
                     status, msgs = imap.search(None, "ALL")
 
                     if status != 'OK':
@@ -61,26 +60,36 @@ class EmailService:
 
                         body = ""
 
+                        # ✅ FIXED BODY EXTRACTION
                         if msg.is_multipart():
                             for part in msg.walk():
-                                if part.get_content_type() in ["text/plain", "text/html"]:
+                                content_type = part.get_content_type()
+                                content_disposition = str(part.get("Content-Disposition"))
+
+                                if content_type in ["text/plain", "text/html"] and "attachment" not in content_disposition:
                                     try:
-                                        body += part.get_payload(decode=True).decode(errors='ignore')
-                                    except:
+                                        payload = part.get_payload(decode=True)
+                                        if payload:
+                                            body += payload.decode('utf-8', errors='ignore')
+                                    except Exception as e:
+                                        print("Decode error:", e)
                                         continue
                         else:
                             try:
-                                body = msg.get_payload(decode=True).decode(errors='ignore')
-                            except:
-                                continue
+                                payload = msg.get_payload(decode=True)
+                                if payload:
+                                    body = payload.decode('utf-8', errors='ignore')
+                            except Exception as e:
+                                print("Single part decode error:", e)
 
-                        # 🔥 DEBUG PRINTS
+                        # 🔥 DEBUG
                         print("----- EMAIL FOUND -----")
                         print("SUBJECT:", msg.get("Subject"))
                         print("FROM:", msg.get("From"))
-                        print("BODY:", body[:300])
+                        print("BODY LENGTH:", len(body))
+                        print("BODY:", body[:500])
 
-                        # 🔥 try extracting code
+                        # 🔥 Try extracting code
                         code = find_signin_code(body)
 
                         if code:
