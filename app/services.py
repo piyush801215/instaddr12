@@ -59,7 +59,7 @@ class EmailService:
             for acc in accounts:
                 try:
                     # 🔥 connect
-                    imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port, timeout=10)
+                    imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port)
                     imap.login(acc.email, acc.password)
                     imap.select("INBOX")  # fixed
 
