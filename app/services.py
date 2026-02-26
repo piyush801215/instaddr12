@@ -41,11 +41,12 @@ class EmailService:
                     # 🔥 connect with timeout
                     imap = imaplib.IMAP4_SSL(acc.imap_host, acc.port, timeout=10)
                     imap.login(acc.email, acc.password)
-                    imap.select("inbox")
+                    imap.select("INBOX")  # ✅ FIX: uppercase
 
                     since_date = time_threshold.strftime("%d-%b-%Y")
 
-                    status, msgs = imap.search(None, f'(TO "{target_email}") (SINCE "{since_date}")')
+                    # ✅ FIX: removed TO filter
+                    status, msgs = imap.search(None, f'(SINCE "{since_date}")')
 
                     if status != 'OK':
                         imap.logout()
@@ -54,15 +55,20 @@ class EmailService:
                     found_content = None
                     email_timestamp = None
 
-                    # ⚡ LIMIT emails (VERY IMPORTANT)
+                    # ⚡ LIMIT emails
                     email_ids = msgs[0].split()
-                    email_ids = email_ids[-20:]  # only last 20 emails
+                    email_ids = email_ids[-20:]
 
                     for eid in reversed(email_ids):
                         try:
                             _, data = imap.fetch(eid, "(RFC822)")
                             msg = email.message_from_bytes(data[0][1])
                         except:
+                            continue
+
+                        # ✅ FIX: filter by target_email manually
+                        headers = str(msg)
+                        if target_email.lower() not in headers.lower():
                             continue
 
                         # check date
@@ -87,10 +93,10 @@ class EmailService:
 
                         if msg.is_multipart():
                             for part in msg.walk():
-                                if part.get_content_type() == "text/plain":
+                                # ✅ FIX: read both plain + html
+                                if part.get_content_type() in ["text/plain", "text/html"]:
                                     try:
-                                        body = part.get_payload(decode=True).decode(errors='ignore')
-                                        break
+                                        body += part.get_payload(decode=True).decode(errors='ignore')
                                     except:
                                         continue
                         else:
