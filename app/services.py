@@ -1,87 +1,96 @@
 import poplib
-import email
 import re
-import html
-from datetime import datetime, timedelta
-from app.models import EmailAccount
+import email
+from email.parser import BytesParser
+from email.policy import default
+
 
 class EmailService:
 
     @staticmethod
-    def fetch_netflix_data(email_address, category):
-
+    def fetch_netflix_data(email_addr, password, host, port):
         try:
-            # --- GET EMAIL CONFIG FROM DB ---
-            acc = EmailAccount.query.filter_by(email=email_address).first()
-            if not acc:
-                return False, "Email config not found", {}
-
-            host = acc.imap_host
-            port = acc.port
-            password = acc.password
-
             print(f"Connecting to: {host} {port}")
 
-            # --- CONNECT POP3 ---
-            server = poplib.POP3_SSL(host, port)
-            server.user(email_address)
-            server.pass_(password)
+            # Connect POP3
+            mail = poplib.POP3_SSL(host, port)
+            mail.user(email_addr)
+            mail.pass_(password)
 
-            # --- GET EMAIL COUNT ---
-            total = len(server.list()[1])
-            print(f"Total emails: {total}")
+            num_messages = len(mail.list()[1])
+            print(f"Total emails: {num_messages}")
 
-            if total == 0:
-                return False, "No emails found", {}
+            # 🔴 Always read LAST email (latest)
+            for i in range(num_messages, 0, -1):
 
-            # --- CHECK LAST 5 EMAILS ONLY ---
-            for i in range(total, max(total - 5, 0), -1):
+                resp, lines, octets = mail.retr(i)
+                msg_content = b"\r\n".join(lines)
 
-                response, lines, octets = server.retr(i)
-                msg_content = b"\n".join(lines)
-                msg = email.message_from_bytes(msg_content)
+                msg = BytesParser(policy=default).parsebytes(msg_content)
 
-                subject = msg.get("Subject", "")
-                sender = msg.get("From", "")
+                subject = msg["subject"] or ""
+                sender = msg["from"] or ""
+
+                # 🔴 Filter only Netflix mails
+                if "netflix" not in sender.lower():
+                    continue
 
                 print("---- EMAIL FOUND ----")
                 print("SUBJECT:", subject)
                 print("FROM:", sender)
 
-                # --- FILTER ONLY NETFLIX ---
-                if "netflix" not in sender.lower():
-                    continue
-
-                # --- GET BODY ---
+                # Get body
                 body = ""
 
                 if msg.is_multipart():
                     for part in msg.walk():
-                        if part.get_content_type() == "text/html":
-                            body = part.get_payload(decode=True).decode(errors="ignore")
-                            break
+                        content_type = part.get_content_type()
+
+                        if content_type in ["text/plain", "text/html"]:
+                            try:
+                                body = part.get_content()
+                                break
+                            except:
+                                continue
                 else:
-                    body = msg.get_payload(decode=True).decode(errors="ignore")
+                    body = msg.get_content()
 
-                # --- CLEAN HTML ---
-                body = html.unescape(body)
-                clean = re.sub('<[^<]+?>', ' ', body)
-                clean = re.sub(r'\s+', ' ', clean)
+                if not body:
+                    continue
 
-                print("CLEAN BODY:", clean[:200])
+                # 🔴 Clean HTML junk
+                clean_body = re.sub(r'<[^>]+>', ' ', body)
+                clean_body = re.sub(r'&[#a-zA-Z0-9]+;', ' ', clean_body)
+                clean_body = re.sub(r'\s+', ' ', clean_body)
 
-                # --- STRICT NETFLIX OTP PATTERN ---
-                match = re.search(r"Masukkan kode.*?(\d{4})", clean, re.IGNORECASE)
+                print("CLEAN BODY:", clean_body[:300])
 
-                if match:
-                    code = match.group(1)
-                    print("FINAL CODE:", code)
-                    server.quit()
-                    return True, code, {}
+                # 🔴 ONLY pick 4-digit codes
+                codes = re.findall(r'\b\d{4}\b', clean_body)
+                print("CODES FOUND:", codes)
 
-            server.quit()
-            return False, "No active Login Code found", {}
+                # 🔴 FILTER REAL OTP (skip garbage numbers)
+                for code in codes:
+                    # Skip common garbage patterns
+                    if code.startswith("0"):   # skip leading zero junk
+                        continue
+
+                    # Skip years or big numbers
+                    if int(code) > 3000 and int(code) < 9999:
+                        # Likely OTP
+                        print("FINAL CODE:", code)
+                        mail.quit()
+                        return True, code, {"msg": "success"}
+
+                # fallback (if above filter fails)
+                if codes:
+                    print("FALLBACK CODE:", codes[0])
+                    mail.quit()
+                    return True, codes[0], {"msg": "success"}
+
+            mail.quit()
+            return False, None, {"msg": "No active Login Code found"}
 
         except Exception as e:
             print("ERROR:", str(e))
-            return False, "Error fetching code", {}
+            return False, None, {"msg": str(e)}
