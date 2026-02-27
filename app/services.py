@@ -1,98 +1,108 @@
+import poplib
+import re
+from email.parser import BytesParser
+from email.policy import default
 from app.models import EmailAccount
-import poplib, email, re
-
-
-def find_signin_code(body):
-    patterns = [
-        r"\b(\d{4})\b",
-        r"(?:code)[^0-9]*(\d{4})"
-    ]
-
-    for pat in patterns:
-        matches = re.findall(pat, body, flags=re.IGNORECASE)
-        for m in matches:
-            if m.isdigit():
-                return m
-    return None
 
 
 class EmailService:
 
     @staticmethod
-    def fetch_netflix_data(target_email, category):
+    def fetch_login_code(target_email):
         try:
-            accounts = EmailAccount.query.all()
+            account = EmailAccount.query.filter_by(email=target_email).first()
+            if not account:
+                return None
 
-            if not accounts:
-                return False, "No email accounts added", None
+            host = account.imap_host
+            port = int(account.port)
+            email_user = account.email
+            email_pass = account.password
 
-            for acc in accounts:
-                try:
-                    print("Connecting POP3:", acc.imap_host, acc.port)
+            print(f"Connecting to: {host} {port}")
 
-                    pop_conn = poplib.POP3_SSL(acc.imap_host, acc.port)
-                    pop_conn.user(acc.email)
-                    pop_conn.pass_(acc.password)
+            # POP3 SSL connection
+            server = poplib.POP3_SSL(host, port, timeout=10)
+            server.user(email_user)
+            server.pass_(email_pass)
 
-                    num_messages = len(pop_conn.list()[1])
-                    print("Total messages:", num_messages)
+            num_messages = len(server.list()[1])
+            print(f"Total messages: {num_messages}")
 
-                    # 🔥 check last 5 emails only
-                    start = max(1, num_messages - 5)
+            # read last 10 emails only
+            start = max(1, num_messages - 10)
 
-                    for i in range(start, num_messages + 1):
-                        try:
-                            raw = b"\n".join(pop_conn.retr(i)[1])
-                            msg = email.message_from_bytes(raw)
-                        except:
-                            continue
+            for i in range(num_messages, start - 1, -1):
+                resp, lines, octets = server.retr(i)
+                msg_content = b"\n".join(lines)
 
-                        body = ""
+                msg = BytesParser(policy=default).parsebytes(msg_content)
 
-                        # 🔥 extract body
-                        if msg.is_multipart():
-                            for part in msg.walk():
-                                if part.get_content_type() in ["text/plain", "text/html"]:
-                                    try:
-                                        payload = part.get_payload(decode=True)
-                                        if payload:
-                                            body += payload.decode(errors='ignore')
-                                    except:
-                                        continue
-                        else:
-                            try:
-                                payload = msg.get_payload(decode=True)
-                                if payload:
-                                    body = payload.decode(errors='ignore')
-                            except:
-                                continue
+                subject = msg["subject"] or ""
+                sender = msg["from"] or ""
 
-                        subject = str(msg.get("Subject", ""))
-                        sender = str(msg.get("From", ""))
+                print("----- EMAIL FOUND -----")
+                print("SUBJECT:", subject)
+                print("FROM:", sender)
 
-                        print("----- EMAIL FOUND -----")
-                        print("SUBJECT:", subject)
-                        print("FROM:", sender)
-                        print("BODY LENGTH:", len(body))
-
-                        # 🔥 Netflix filter
-                        if "netflix" not in (subject + sender).lower():
-                            continue
-
-                        code = find_signin_code(body)
-
-                        if code:
-                            print("CODE FOUND:", code)
-                            pop_conn.quit()
-                            return True, code, None
-
-                    pop_conn.quit()
-
-                except Exception as e:
-                    print("POP3 error:", e)
+                # 🔥 FILTER ONLY NETFLIX EMAILS
+                if "netflix" not in sender.lower():
                     continue
 
-            return False, "No active Login Code found", None
+                # get body
+                body = ""
+
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        content_type = part.get_content_type()
+                        if content_type == "text/plain":
+                            body = part.get_content()
+                            break
+                else:
+                    body = msg.get_content()
+
+                if not body:
+                    continue
+
+                print("BODY:", body[:300])
+
+                # 🔥 EXTRACT CODE (SMART)
+                code = EmailService.extract_code(body)
+
+                if code:
+                    print("CODE FOUND:", code)
+                    server.quit()
+                    return code
+
+            server.quit()
+            return None
 
         except Exception as e:
-            return False, str(e), None
+            print("ERROR:", str(e))
+            return None
+
+    # 🔥 SMART EXTRACTION LOGIC
+    @staticmethod
+    def extract_code(text):
+        if not text:
+            return None
+
+        # 1️⃣ Try strong patterns first
+        patterns = [
+            r"sign[- ]?in code[^\d]*(\d{4})",
+            r"security code[^\d]*(\d{4})",
+            r"temporary access code[^\d]*(\d{4})",
+            r"verification code[^\d]*(\d{4})",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+
+        # 2️⃣ fallback: pick LAST 4-digit number
+        all_codes = re.findall(r"\b\d{4}\b", text)
+        if all_codes:
+            return all_codes[-1]
+
+        return None
