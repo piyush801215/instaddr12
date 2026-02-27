@@ -1,97 +1,120 @@
 import poplib
+import email
 import re
+import html
 from email.parser import BytesParser
 from email.policy import default
-from html import unescape
-
-from app.models import EmailAccount
-from app import db
+from datetime import datetime
 
 
 class EmailService:
 
     @staticmethod
-    def fetch_netflix_data(email, category):
+    def clean_body(body):
+        # Decode HTML entities (&#8199; etc)
+        body = html.unescape(body)
+
+        # Remove style and script blocks
+        body = re.sub(r'<style.*?>.*?</style>', '', body, flags=re.DOTALL)
+        body = re.sub(r'<script.*?>.*?</script>', '', body, flags=re.DOTALL)
+
+        # Remove all HTML tags
+        body = re.sub(r'<.*?>', ' ', body)
+
+        # Remove encoded junk
+        body = re.sub(r'&#\d+;', ' ', body)
+
+        # Normalize spaces
+        body = re.sub(r'\s+', ' ', body)
+
+        return body
+
+
+    @staticmethod
+    def extract_code(text):
+        # 1. Try spaced digits (3 2 7 4)
+        match = re.search(r'(?:\d\s*){4}', text)
+        if match:
+            code = re.sub(r'\D', '', match.group())
+            if len(code) == 4:
+                print("JOINED CODE:", code)
+                return code
+
+        # 2. Try normal 4-digit
+        codes = re.findall(r'\b\d{4}\b', text)
+        print("CODES FOUND:", codes)
+
+        if codes:
+            return codes[0]
+
+        return None
+
+
+    @staticmethod
+    def fetch_netflix_data(email_user, password, host, port):
         try:
-            # Get account from DB
-            acc = EmailAccount.query.filter_by(email=email).first()
-            if not acc:
-                return False, "Email not found", None
-
-            host = acc.imap_host
-            port = acc.port
-            password = acc.password
-
             print(f"Connecting to: {host} {port}")
 
-            # POP3 SSL connect
-            pop_conn = poplib.POP3_SSL(host, port)
-            pop_conn.user(email)
-            pop_conn.pass_(password)
+            mail = poplib.POP3_SSL(host, int(port))
+            mail.user(email_user)
+            mail.pass_(password)
 
-            # Get emails
-            total_messages = len(pop_conn.list()[1])
-            print(f"Total emails: {total_messages}")
+            num_messages = len(mail.list()[1])
+            print("Total emails:", num_messages)
 
-            if total_messages == 0:
-                return False, "No emails found", None
+            if num_messages == 0:
+                return False, None, "No emails found"
 
-            # Read last 10 emails
-            for i in range(total_messages, max(total_messages - 10, 0), -1):
+            # check last 5 emails only
+            for i in range(num_messages, max(num_messages - 5, 0), -1):
+                response, lines, octets = mail.retr(i)
 
-                raw_email = b"\n".join(pop_conn.retr(i)[1])
-                msg = BytesParser(policy=default).parsebytes(raw_email)
+                msg_content = b"\r\n".join(lines)
+                msg = BytesParser(policy=default).parsebytes(msg_content)
 
-                subject = str(msg["subject"])
-                sender = str(msg["from"])
+                subject = str(msg.get("subject"))
+                sender = str(msg.get("from"))
 
                 print("---- EMAIL FOUND ----")
                 print("SUBJECT:", subject)
                 print("FROM:", sender)
 
-                # Filter Netflix emails
+                # filter Netflix mail
                 if "netflix" not in subject.lower() and "netflix" not in sender.lower():
                     continue
 
-                # Get body
                 body = ""
 
                 if msg.is_multipart():
                     for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body = part.get_content()
-                            break
-                        elif part.get_content_type() == "text/html":
-                            body = part.get_content()
+                        content_type = part.get_content_type()
+                        if content_type == "text/html" or content_type == "text/plain":
+                            try:
+                                body += part.get_payload(decode=True).decode(errors="ignore")
+                            except:
+                                pass
                 else:
-                    body = msg.get_content()
+                    try:
+                        body = msg.get_payload(decode=True).decode(errors="ignore")
+                    except:
+                        pass
 
-                if not body:
-                    continue
+                print("RAW BODY:", body[:500])
 
-                # Decode HTML entities
-                body = unescape(body)
+                clean = EmailService.clean_body(body)
 
-                # 🔥 IMPORTANT FIX
-                # Remove all HTML tags
-                body = re.sub(r'<.*?>', ' ', body)
+                print("CLEAN BODY:", clean[:500])
 
-                # Normalize spaces
-                body = re.sub(r'\s+', ' ', body)
+                code = EmailService.extract_code(clean)
 
-                print("CLEAN BODY:", body[:300])
+                if code:
+                    print("FINAL CODE:", code)
+                    mail.quit()
+                    return True, code, None
 
-                # Find 4-digit code (Netflix OTP)
-                codes = re.findall(r'\b\d{4}\b', body)
-
-                print("CODES FOUND:", codes)
-
-                if codes:
-                    # Return last code (latest)
-                    return True, codes[-1], None
-
-            return False, "No active Login Code found", None
+            mail.quit()
+            return False, None, "No active Login Code found"
 
         except Exception as e:
             print("ERROR:", str(e))
-            return False, "Connection failed", None
+            return False, None, str(e)
