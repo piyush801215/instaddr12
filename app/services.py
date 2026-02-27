@@ -21,7 +21,7 @@ class EmailService:
 
             print(f"Connecting to: {host} {port}")
 
-            # POP3 SSL connection
+            # POP3 SSL
             server = poplib.POP3_SSL(host, port, timeout=10)
             server.user(email_user)
             server.pass_(email_pass)
@@ -29,7 +29,7 @@ class EmailService:
             num_messages = len(server.list()[1])
             print(f"Total emails: {num_messages}")
 
-            # read last 10 emails
+            # last 10 emails
             start = max(1, num_messages - 10)
 
             for i in range(num_messages, start - 1, -1):
@@ -45,11 +45,11 @@ class EmailService:
                 print("SUBJECT:", subject)
                 print("FROM:", sender)
 
-                # 🔥 filter netflix mails
+                # filter netflix
                 if "netflix" not in sender.lower() and "netflix" not in subject.lower():
                     continue
 
-                # 🔥 extract body (plain + html)
+                # get body (plain + html)
                 body = ""
 
                 if msg.is_multipart():
@@ -70,7 +70,7 @@ class EmailService:
 
                 print("BODY PREVIEW:", body[:200])
 
-                # 🔥 extract code
+                # extract code
                 code = EmailService.extract_code(body)
 
                 if code:
@@ -86,19 +86,22 @@ class EmailService:
             return False, str(e), None
 
 
-    # 🔥 MULTI-LANGUAGE CODE EXTRACTION
+    # 🔥 FINAL FIXED EXTRACTOR
     @staticmethod
     def extract_code(text):
         if not text:
             return None
 
-        # multilingual netflix patterns
+        # 🔥 REMOVE HTML TAGS
+        text = re.sub(r'<[^>]+>', ' ', text)
+
+        # remove extra spaces
+        text = re.sub(r'\s+', ' ', text)
+
+        # 🔥 SMART MATCH (multi-language)
         patterns = [
-            r"code[^\d]*(\d{4})",
-            r"kode[^\d]*(\d{4})",       # Indonesian
-            r"código[^\d]*(\d{4})",     # Spanish
-            r"code d[^\d]*(\d{4})",     # French
-            r"код[^\d]*(\d{4})",        # Russian
+            r"(?:kode|code)[^\d]{0,20}(\d{4})",
+            r"(\d{4})[^\d]{0,20}(?:kode|code)",
         ]
 
         for pattern in patterns:
@@ -106,7 +109,7 @@ class EmailService:
             if match:
                 return match.group(1)
 
-        # fallback → last 4-digit number
+        # 🔥 fallback (last 4-digit only after cleaning)
         all_codes = re.findall(r"\b\d{4}\b", text)
         if all_codes:
             return all_codes[-1]
