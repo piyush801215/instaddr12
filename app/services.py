@@ -7,7 +7,6 @@ from app.models import EmailAccount
 
 class EmailService:
 
-    # 🔥 MAIN FUNCTION (must match routes.py)
     @staticmethod
     def fetch_netflix_data(target_email, cat=None):
         try:
@@ -22,7 +21,7 @@ class EmailService:
 
             print(f"Connecting to: {host} {port}")
 
-            # ✅ POP3 SSL connection
+            # POP3 SSL connection
             server = poplib.POP3_SSL(host, port, timeout=10)
             server.user(email_user)
             server.pass_(email_pass)
@@ -30,7 +29,7 @@ class EmailService:
             num_messages = len(server.list()[1])
             print(f"Total emails: {num_messages}")
 
-            # read last 10 emails only
+            # read last 10 emails
             start = max(1, num_messages - 10)
 
             for i in range(num_messages, start - 1, -1):
@@ -46,27 +45,32 @@ class EmailService:
                 print("SUBJECT:", subject)
                 print("FROM:", sender)
 
-                # 🔥 FILTER ONLY NETFLIX MAILS
-                if "netflix" not in sender.lower():
+                # 🔥 filter netflix mails
+                if "netflix" not in sender.lower() and "netflix" not in subject.lower():
                     continue
 
-                # 🔥 GET BODY
+                # 🔥 extract body (plain + html)
                 body = ""
 
                 if msg.is_multipart():
                     for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
+                        content_type = part.get_content_type()
+
+                        if content_type == "text/plain":
                             body = part.get_content()
                             break
+
+                        if content_type == "text/html" and not body:
+                            body = part.get_content()
                 else:
                     body = msg.get_content()
 
                 if not body:
                     continue
 
-                print("BODY:", body[:300])
+                print("BODY PREVIEW:", body[:200])
 
-                # 🔥 EXTRACT CODE
+                # 🔥 extract code
                 code = EmailService.extract_code(body)
 
                 if code:
@@ -81,18 +85,20 @@ class EmailService:
             print("ERROR:", str(e))
             return False, str(e), None
 
-    # 🔥 CODE EXTRACTION LOGIC
+
+    # 🔥 MULTI-LANGUAGE CODE EXTRACTION
     @staticmethod
     def extract_code(text):
         if not text:
             return None
 
-        # 1️⃣ Strong patterns
+        # multilingual netflix patterns
         patterns = [
-            r"sign[- ]?in code[^\d]*(\d{4})",
-            r"security code[^\d]*(\d{4})",
-            r"temporary access code[^\d]*(\d{4})",
-            r"verification code[^\d]*(\d{4})",
+            r"code[^\d]*(\d{4})",
+            r"kode[^\d]*(\d{4})",       # Indonesian
+            r"código[^\d]*(\d{4})",     # Spanish
+            r"code d[^\d]*(\d{4})",     # French
+            r"код[^\d]*(\d{4})",        # Russian
         ]
 
         for pattern in patterns:
@@ -100,7 +106,7 @@ class EmailService:
             if match:
                 return match.group(1)
 
-        # 2️⃣ fallback (last 4-digit)
+        # fallback → last 4-digit number
         all_codes = re.findall(r"\b\d{4}\b", text)
         if all_codes:
             return all_codes[-1]
