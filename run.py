@@ -1,6 +1,5 @@
 from app import create_app, db
 from app.models import User
-from app.telegram_bot import start_telegram_bot
 import os
 import threading
 
@@ -21,12 +20,6 @@ with app.app_context():
     db.create_all()
     setup_initial_admin()
 
-# 🚀 START TELEGRAM BOT IN BACKGROUND
-def start_bot():
-    with app.app_context():
-        start_telegram_bot()
-
-threading.Thread(target=start_bot).start()
 
 @app.route("/")
 def home():
