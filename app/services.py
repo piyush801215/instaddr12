@@ -1,6 +1,6 @@
 from app.models import EmailAccount
-import imaplib, email, re, pytz
-from datetime import datetime, timedelta
+import imaplib, email, re
+from datetime import datetime
 
 
 def clean_url(u):
@@ -41,15 +41,18 @@ class EmailService:
                     imap.login(acc.email, acc.password)
                     imap.select("INBOX")
 
-                    # 🔥 get all emails (for debugging)
-                    status, msgs = imap.search(None, "ALL")
+                    # 🔥 FAST SEARCH (only today's emails)
+                    today = datetime.now().strftime("%d-%b-%Y")
+                    status, msgs = imap.search(None, f'(SINCE "{today}")')
 
                     if status != 'OK':
                         imap.logout()
                         continue
 
                     email_ids = msgs[0].split()
-                    email_ids = email_ids[-20:]  # last 20 emails
+
+                    # 🔥 limit emails (VERY IMPORTANT)
+                    email_ids = email_ids[-5:]
 
                     for eid in reversed(email_ids):
                         try:
@@ -60,7 +63,7 @@ class EmailService:
 
                         body = ""
 
-                        # ✅ FIXED BODY EXTRACTION
+                        # 🔥 FIXED BODY EXTRACTION
                         if msg.is_multipart():
                             for part in msg.walk():
                                 content_type = part.get_content_type()
@@ -71,25 +74,27 @@ class EmailService:
                                         payload = part.get_payload(decode=True)
                                         if payload:
                                             body += payload.decode('utf-8', errors='ignore')
-                                    except Exception as e:
-                                        print("Decode error:", e)
+                                    except:
                                         continue
                         else:
                             try:
                                 payload = msg.get_payload(decode=True)
                                 if payload:
                                     body = payload.decode('utf-8', errors='ignore')
-                            except Exception as e:
-                                print("Single part decode error:", e)
+                            except:
+                                continue
 
                         # 🔥 DEBUG
                         print("----- EMAIL FOUND -----")
                         print("SUBJECT:", msg.get("Subject"))
                         print("FROM:", msg.get("From"))
                         print("BODY LENGTH:", len(body))
-                        print("BODY:", body[:500])
 
-                        # 🔥 Try extracting code
+                        # 🔥 Netflix filter (optional)
+                        if "netflix" not in (msg.get("From", "") + msg.get("Subject", "")).lower():
+                            continue
+
+                        # 🔥 Extract code
                         code = find_signin_code(body)
 
                         if code:
