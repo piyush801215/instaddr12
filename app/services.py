@@ -1,84 +1,82 @@
 import poplib
 import re
+import ssl
 from email.parser import BytesParser
 from email.policy import default
+from datetime import datetime, timedelta
+
 from app.models import EmailAccount
 
 
 class EmailService:
 
     @staticmethod
-    def fetch_netflix_data(target_email, cat=None):
+    def fetch_netflix_data(email, category=None):
         try:
-            account = EmailAccount.query.filter_by(email=target_email).first()
-            if not account:
+            acc = EmailAccount.query.filter_by(email=email).first()
+
+            if not acc:
                 return False, "Email not found", None
 
-            host = account.imap_host
-            port = int(account.port)
-            email_user = account.email
-            email_pass = account.password
+            host = acc.imap_host
+            port = acc.port
+            password = acc.password
 
             print(f"Connecting to: {host} {port}")
 
             # POP3 SSL
-            server = poplib.POP3_SSL(host, port, timeout=10)
-            server.user(email_user)
-            server.pass_(email_pass)
+            mail = poplib.POP3_SSL(host, port, timeout=20)
+            mail.user(email)
+            mail.pass_(password)
 
-            num_messages = len(server.list()[1])
-            print(f"Total emails: {num_messages}")
+            num_messages = len(mail.list()[1])
+            print("Total emails:", num_messages)
 
-            # last 10 emails
-            start = max(1, num_messages - 10)
+            # check last 5 emails only
+            for i in range(num_messages, max(num_messages - 5, 0), -1):
 
-            for i in range(num_messages, start - 1, -1):
-                resp, lines, octets = server.retr(i)
+                response, lines, octets = mail.retr(i)
                 msg_content = b"\n".join(lines)
 
                 msg = BytesParser(policy=default).parsebytes(msg_content)
 
-                subject = msg["subject"] or ""
-                sender = msg["from"] or ""
+                subject = str(msg.get("subject", ""))
+                sender = str(msg.get("from", ""))
 
                 print("----- EMAIL FOUND -----")
                 print("SUBJECT:", subject)
                 print("FROM:", sender)
 
-                # filter netflix
+                # ONLY Netflix emails
                 if "netflix" not in sender.lower() and "netflix" not in subject.lower():
                     continue
 
-                # get body (plain + html)
+                # GET BODY
                 body = ""
 
                 if msg.is_multipart():
                     for part in msg.walk():
                         content_type = part.get_content_type()
-
-                        if content_type == "text/plain":
-                            body = part.get_content()
-                            break
-
-                        if content_type == "text/html" and not body:
-                            body = part.get_content()
+                        if content_type in ["text/plain", "text/html"]:
+                            try:
+                                body += part.get_content()
+                            except:
+                                pass
                 else:
-                    body = msg.get_content()
+                    try:
+                        body = msg.get_content()
+                    except:
+                        pass
 
-                if not body:
-                    continue
+                print("BODY PREVIEW:", body[:300])
 
-                print("BODY PREVIEW:", body[:200])
-
-                # extract code
+                # EXTRACT CODE
                 code = EmailService.extract_code(body)
 
                 if code:
                     print("CODE FOUND:", code)
-                    server.quit()
                     return True, code, None
 
-            server.quit()
             return False, "No active Login Code found", None
 
         except Exception as e:
@@ -86,32 +84,30 @@ class EmailService:
             return False, str(e), None
 
 
-    # 🔥 FINAL FIXED EXTRACTOR
     @staticmethod
     def extract_code(text):
         if not text:
             return None
 
-        # 🔥 REMOVE HTML TAGS
+        # REMOVE HTML TAGS
         text = re.sub(r'<[^>]+>', ' ', text)
 
-        # remove extra spaces
+        # NORMALIZE TEXT
         text = re.sub(r'\s+', ' ', text)
 
-        # 🔥 SMART MATCH (multi-language)
-        patterns = [
-            r"(?:kode|code)[^\d]{0,20}(\d{4})",
-            r"(\d{4})[^\d]{0,20}(?:kode|code)",
-        ]
+        # SPLIT INTO SENTENCES
+        parts = re.split(r'[.!?]', text)
 
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1)
+        for part in parts:
+            lower = part.lower()
 
-        # 🔥 fallback (last 4-digit only after cleaning)
-        all_codes = re.findall(r"\b\d{4}\b", text)
-        if all_codes:
-            return all_codes[-1]
+            # ONLY lines with keyword
+            if "code" in lower or "kode" in lower:
+                print("CHECKING LINE:", part.strip())
 
+                match = re.search(r"\b\d{4}\b", part)
+                if match:
+                    return match.group(0)
+
+        # ❌ NO RANDOM FALLBACK
         return None
