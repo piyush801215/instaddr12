@@ -9,20 +9,18 @@ from email.policy import default
 class EmailService:
 
     @staticmethod
-    def fetch_netflix_code(email_address, password, host, port):
+    def fetch_netflix_data(email_address, password, host, port):
         try:
             print(f"Connecting to: {host} {port}")
 
-            # POP3 SSL connection
             mail = poplib.POP3_SSL(host, port)
             mail.user(email_address)
             mail.pass_(password)
 
-            # Get number of messages
             num_messages = len(mail.list()[1])
             print("Total emails:", num_messages)
 
-            # Check last 10 emails (latest first)
+            # check latest 10 emails
             for i in range(num_messages, max(num_messages - 10, 0), -1):
                 raw_email = b"\n".join(mail.retr(i)[1])
                 msg = BytesParser(policy=default).parsebytes(raw_email)
@@ -34,25 +32,19 @@ class EmailService:
                 print("SUBJECT:", subject)
                 print("FROM:", sender)
 
-                # Filter Netflix mails only
                 if "netflix" not in subject.lower() and "netflix" not in sender.lower():
                     continue
 
-                # Get email body
                 body = EmailService.get_body(msg)
 
-                print("BODY PREVIEW:", body[:500])
+                print("BODY PREVIEW:", body[:300])
 
-                # Extract OTP
                 code = EmailService.extract_code(body)
 
                 if code:
-                    print("CODE FOUND:", code)
+                    print("FINAL CODE:", code)
                     mail.quit()
-                    return True, code, {
-                        "subject": subject,
-                        "from": sender
-                    }
+                    return True, code, {}
 
             mail.quit()
             return False, "No active Login Code found", {}
@@ -65,8 +57,7 @@ class EmailService:
     def get_body(msg):
         if msg.is_multipart():
             for part in msg.walk():
-                content_type = part.get_content_type()
-                if content_type in ["text/plain", "text/html"]:
+                if part.get_content_type() in ["text/plain", "text/html"]:
                     try:
                         return part.get_payload(decode=True).decode(errors="ignore")
                     except:
@@ -84,28 +75,28 @@ class EmailService:
         if not text:
             return None
 
-        # 1. Decode HTML entities (IMPORTANT)
+        # decode HTML entities
         text = html.unescape(text)
 
-        # 2. Remove HTML tags
+        # remove HTML tags
         text = re.sub(r'<[^>]+>', ' ', text)
 
-        # 3. Normalize spaces
+        # normalize spaces
         text = re.sub(r'\s+', ' ', text)
 
         print("CLEAN TEXT:", text[:500])
 
-        # 4. Extract spaced digits like "3 2 7 4"
-        spaced_match = re.search(r'(?:\d\s+){3}\d', text)
-        if spaced_match:
-            code = spaced_match.group(0).replace(" ", "")
-            print("CODE FOUND (spaced):", code)
+        # STRICT Netflix pattern (very important)
+        match = re.search(r'kode ini untuk masuk.*?((?:\d\s*){4})', text, re.IGNORECASE)
+        if match:
+            code = re.sub(r'\s+', '', match.group(1))
+            print("CODE FOUND (netflix specific):", code)
             return code
 
-        # 5. Extract normal 4-digit code
-        normal_match = re.search(r'\b\d{4}\b', text)
-        if normal_match:
-            print("CODE FOUND (normal):", normal_match.group(0))
-            return normal_match.group(0)
+        # fallback
+        match2 = re.search(r'\b\d{4}\b', text)
+        if match2:
+            print("CODE FOUND (fallback):", match2.group(0))
+            return match2.group(0)
 
         return None
